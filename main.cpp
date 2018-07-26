@@ -22,7 +22,7 @@ Camera m_camera;
 TessShader m_shader;
 Mesh m_basemesh;
 GLuint disTex, NormalTex;
-GLuint vertexbuffer, uvbuffer, transformbuffer;
+GLuint vertexbuffer[2], uvbuffer, transformbuffer[2];
 
 std::vector<glm::vec3> vertices;
 std::vector<glm::vec2> uvs;
@@ -32,6 +32,7 @@ std::vector<GLfloat> feedback;
 TransformShader m_transform;
 
 unsigned int m_currVB = 0;
+unsigned int  m_currTFB = 1;
 
 int verticesnum = 0;
 
@@ -44,7 +45,7 @@ GLuint query;
 #define TextureWidth 512
 #define TextureHeight 512
 
-#define MAXVERTICES 16
+#define MAXVERTICES 256
 
 void TransformFeedback()
 {
@@ -68,6 +69,10 @@ void TransformFeedback()
 		vertices.push_back(vert_pos1);
 		vertices.push_back(vert_pos2);
 		vertices.push_back(vert_pos3);
+
+		//vertices[3 * i] = vert_pos1;
+		//vertices[3 * i + 1] = vert_pos2;
+		//vertices[3 * i + 2] = vert_pos3;
 
 		uvs.push_back(vert_coord1);
 		uvs.push_back(vert_coord2);
@@ -93,16 +98,18 @@ void TransformFeedback()
 	glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
 	glBufferData(GL_ARRAY_BUFFER, uvs.size() * sizeof(glm::vec2), &uvs[0], GL_STATIC_DRAW);
 
-	glGenBuffers(1, &vertexbuffer);
-	glGenTransformFeedbacks(1, &transformbuffer);
-
+	glGenBuffers(2, vertexbuffer);
+	glGenTransformFeedbacks(2, transformbuffer);
 	
-	glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformbuffer);
-	glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
-	glBufferData(GL_ARRAY_BUFFER, MAXVERTICES * vertices.size() * sizeof(glm::vec3), &vertices[0], GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, vertexbuffer);
+	for (int i = 0; i < 2; i++)
+	{
+		glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformbuffer[i]);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer[i]);
+		glBufferData(GL_ARRAY_BUFFER, MAXVERTICES * vertices.size() * sizeof(glm::vec3), &vertices[0], GL_DYNAMIC_DRAW);
+		glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, vertexbuffer[i]);
+	}
 	
-
+	
 }
 
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods) {
@@ -155,6 +162,8 @@ void TransformRender()
 	GLenum err = glGetError();
 	m_transform.Enable();
 	m_transform.SetDisTex(0);
+
+	err = glGetError();
 	glEnable(GL_TEXTURE_2D);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, disTex);
@@ -163,15 +172,11 @@ void TransformRender()
 
 	glEnable(GL_RASTERIZER_DISCARD);
 
-	glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformbuffer);
-
-	glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, query);
-
-	glBeginTransformFeedback(GL_TRIANGLES);
+	glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, transformbuffer[m_currTFB]);
 
 	// 1rst attribute buffer : vertices
 	glEnableVertexAttribArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer[m_currVB]);
 	glVertexAttribPointer(
 		0,                  // attribute
 		3,                  // size
@@ -193,29 +198,38 @@ void TransformRender()
 		(void*)0                          // array buffer offset
 	);
 
+	glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, query);
+
+	glBeginTransformFeedback(GL_TRIANGLES);
+
+	err = glGetError();
 
 	glDrawArrays(GL_PATCHES, 0, verticesnum);
 
-	glDisableVertexAttribArray(0);
-	glDisableVertexAttribArray(1);
+	err = glGetError();
 
 	glEndTransformFeedback();
 	glUseProgram(0);
 
 	glEndQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN);
 
+	err = glGetError();
+
 	GLuint primitives;
 	glGetQueryObjectuiv(query, GL_QUERY_RESULT, &primitives);
 
-	glDisable(GL_RASTERIZER_DISCARD);
+	glDisableVertexAttribArray(0);
+	glDisableVertexAttribArray(1);
 
 	err = glGetError();
 	feedback.resize(primitives * 3 * 3);
 
 	glGetBufferSubData(GL_TRANSFORM_FEEDBACK_BUFFER, 0, feedback.size() * sizeof(GLfloat), feedback.data());
 
-
 	SaveObj(feedback);
+
+	m_currVB = m_currTFB;
+	m_currTFB = (m_currTFB + 1) & 0x1;
 }
 
 
@@ -291,14 +305,14 @@ int main()
 		m_camera.CameraKeyMove(keys, currentTime - lastTime);
 
 		lastTime = currentTime;
-
+		
 		// Swap buffers
 		glfwSwapBuffers(window);
 
 	} // Check if the ESC key was pressed or the window was closed
 	while (glfwWindowShouldClose(window) == 0);
 
-	glDeleteBuffers(1, &vertexbuffer);
+	glDeleteBuffers(2, vertexbuffer);
 	glDeleteBuffers(1, &uvbuffer);
 	// Close OpenGL window and terminate GLFW
 	glfwTerminate();
